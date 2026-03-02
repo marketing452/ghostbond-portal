@@ -1,26 +1,47 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-brand-bg: #0d0d0d;
+  --color-brand-text: #f5f0e8;
+  --color-brand-accent: #c9993a;
+  --color-brand-card: #1a1a1a;
+  --color-brand-border: #333333;
+  --color-brand-danger: #c0392b;
+  --color-brand-success: #27ae60;
+  --color-brand-info: #2980b9;
+
+  --font-bebas: "Bebas Neue", sans-serif;
+  --font-dm: "DM Sans", sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@layer base {
+  body {
+    background-color: var(--color-brand-bg);
+    color: var(--color-brand-text);
+    /* Subtle noise overlay */
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+    font-family: var(--font-dm);
+  }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-bebas);
+    letter-spacing: 0.05em;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .btn-primary {
+    @apply bg-brand-accent text-[#0d0d0d] px-6 py-2 font-bebas text-xl uppercase tracking-wide hover:brightness-110 transition-all rounded-sm;
+  }
+  .btn-secondary {
+    @apply border border-brand-border text-brand-text px-6 py-2 font-bebas text-xl uppercase tracking-wide hover:bg-brand-card transition-all rounded-sm;
+  }
+  .input-field {
+    @apply bg-brand-card border border-brand-border text-brand-text px-4 py-2 rounded-sm focus:outline-none focus:border-brand-accent transition-colors w-full;
+  }
 }

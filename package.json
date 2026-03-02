@@ -9,6 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@notionhq/client": "^5.11.0",
+    "@react-oauth/google": "^0.13.4",
+    "@vercel/blob": "^2.3.0",
+    "date-fns": "^4.1.0",
+    "jwt-decode": "^4.0.0",
+    "lucide-react": "^0.576.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"
@@ -21,6 +27,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "5.9.3"
   }
 }
