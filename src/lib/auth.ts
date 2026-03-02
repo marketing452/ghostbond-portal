@@ -3,11 +3,6 @@ export function isManager(email: string | null | undefined): boolean {
   
   const lowerEmail = email.toLowerCase();
   
-  // Implicitly allow all Ghostbond domains to act as managers
-  if (lowerEmail.endsWith('@ghostbond.com')) {
-    return true;
-  }
-  
   const managerEmailsStr = process.env.MANAGER_EMAILS || '';
   const managerEmails = managerEmailsStr.split(',').map(e => e.trim().toLowerCase());
   

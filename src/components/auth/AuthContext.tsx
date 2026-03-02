@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { jwtDecode } from "jwt-decode";
-import { isManager, isAuthorizedDomain } from "@/lib/auth";
+import { isAuthorizedDomain } from "@/lib/auth";
 
 interface User {
   email: string;
@@ -32,15 +32,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsReady(true);
   }, []);
 
-  const handleToken = (token: string) => {
+  const handleToken = async (token: string) => {
     try {
       const decoded = jwtDecode<any>(token);
       if (isAuthorizedDomain(decoded.email)) {
+        
+        // Fetch isManager securely from the server
+        const res = await fetch(`/api/auth/me?email=${encodeURIComponent(decoded.email)}`);
+        const data = await res.json();
+        const isManagerFlag = data.isManager || false;
+
         setUser({
           email: decoded.email,
           name: decoded.name,
           picture: decoded.picture,
-          isManager: isManager(decoded.email),
+          isManager: isManagerFlag,
         });
         localStorage.setItem("ghostbond_auth", token);
       } else {

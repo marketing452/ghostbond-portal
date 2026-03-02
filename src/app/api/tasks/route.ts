@@ -31,6 +31,7 @@ export async function GET(request: Request) {
 
   try {
     const isMgr = isManager(email);
+    console.log('[DEBUG] isManager check for', email, ':', isMgr);
     let filter: any = undefined;
 
     if (!isMgr) {
@@ -41,7 +42,10 @@ export async function GET(request: Request) {
           equals: email
         }
       };
+    } else {
+      console.log('[DEBUG] User is Manager, bypassing Notion filter to fetch all tasks.');
     }
+    
     const DATABASE_ID = getDatabaseId();
     const queryPayload: any = {
       database_id: DATABASE_ID,
