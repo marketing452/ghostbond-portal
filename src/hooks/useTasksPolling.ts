@@ -37,7 +37,7 @@ export function useTasksPolling() {
         // If it's a completely new task (and we aren't just initially loading)
         if (!prevTask) {
            toast.success(`New Task Created`, {
-              description: task.title,
+              description: task.name,
            });
            return;
         }
@@ -45,7 +45,7 @@ export function useTasksPolling() {
         // If the task status changed
         if (prevTask.status !== task.status) {
           toast.info(`Task Status Updated`, {
-            description: `"${task.title}" is now ${task.status}`,
+            description: `"${task.name}" is now ${task.status}`,
           });
         }
       });
