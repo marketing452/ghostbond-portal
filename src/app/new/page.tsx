@@ -1,6 +1,14 @@
 "use client";
 
-import { upload } from '@vercel/blob/client';
+for (const file of selectedFiles) {
+  const uploadRes = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    body: file,
+  });
+  if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
+  const blobData = await uploadRes.json();
+  fileLinks.push(blobData.url);
+}
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Save, X } from "lucide-react";
