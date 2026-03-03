@@ -1,4 +1,4 @@
-import { handleUpload, type HandleUploadBody } from '@vercel/blob/multipart';
+import { handleUpload, type HandleUploadBody } from '@vercel/blob';
 import { NextResponse } from 'next/server';
 import { isAuthorizedDomain } from '@/lib/auth';
 
