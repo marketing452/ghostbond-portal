@@ -106,10 +106,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
-```
-
-In Notion it will now look like:
-```
-[madan.haribhat@prohairlabs.com] Hi check this out
-📎 video.mp4          ← clickable link
-📎 brief.pdf          ← clickable link
