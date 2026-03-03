@@ -22,19 +22,30 @@ export async function GET(request: Request) {
     const comments = response.results.map((c: any) => {
       const fullText = c.rich_text?.map((rt: any) => rt.plain_text).join('') || '';
 
-      // Parse file URLs appended as JSON at the end of the comment text
-      // Format: "comment text\n__files__:[\"url1\",\"url2\"]"
-      let text = fullText;
+      // Extract email from [email] prefix added during POST
+      let rawText = fullText;
+      let createdBy = 'Unknown';
+      const emailMatch = fullText.match(/^\[([^\]]+)\]\s*/);
+      if (emailMatch) {
+        createdBy = emailMatch[1];
+        rawText = fullText.slice(emailMatch[0].length);
+      }
+
+      // Convert email to display name e.g. "madan.haribhat@prohairlabs.com" → "Madan Haribhat"
+      const displayName = createdBy.includes('@')
+        ? createdBy.split('@')[0].split('.').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+        : createdBy;
+
+      // Parse file URLs appended as JSON
+      let text = rawText;
       let fileUrls: string[] = [];
       const fileMarker = '\n__files__:';
-      const markerIdx = fullText.lastIndexOf(fileMarker);
+      const markerIdx = rawText.lastIndexOf(fileMarker);
       if (markerIdx !== -1) {
-        text = fullText.slice(0, markerIdx);
+        text = rawText.slice(0, markerIdx);
         try {
-          fileUrls = JSON.parse(fullText.slice(markerIdx + fileMarker.length));
-        } catch {
-          // ignore parse errors
-        }
+          fileUrls = JSON.parse(rawText.slice(markerIdx + fileMarker.length));
+        } catch {}
       }
 
       return {
@@ -42,7 +53,7 @@ export async function GET(request: Request) {
         text,
         fileUrls,
         createdTime: c.created_time,
-        createdBy: c.created_by?.person?.email || c.created_by?.name || 'Unknown',
+        createdBy: displayName,
       };
     });
 
@@ -66,7 +77,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    // Build comment content: prefix with email, append file URLs as encoded JSON
     let commentContent = `[${email}] ${text || ''}`.trim();
     if (fileUrls && fileUrls.length > 0) {
       commentContent += `\n__files__:${JSON.stringify(fileUrls)}`;
