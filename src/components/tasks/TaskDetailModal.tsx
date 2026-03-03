@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Task } from "@/types/task";
-import { X, ExternalLink, Calendar, Send } from "lucide-react";
+import { X, Send, Paperclip, FileIcon } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { format } from "date-fns";
 
@@ -12,35 +12,66 @@ interface TaskDetailModalProps {
   onUpdate: (updatedTask: Task) => void;
 }
 
+const MAX_COMMENT_FILES = 10;
+const MAX_COMMENT_BYTES = 100 * 1024 * 1024;
+
 export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailModalProps) {
   const { user } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
-  
+
   // Edit State
   const [status, setStatus] = useState(task.status);
   const [dueDate, setDueDate] = useState(task.dueDate || "");
   const [assignedEmail, setAssignedEmail] = useState(task.assignedTo[0] || "");
-  
+
   // Comments State
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState("");
   const [loadingComments, setLoadingComments] = useState(true);
+  const [commentFiles, setCommentFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState("");
+  const [isPosting, setIsPosting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Push notification state
+  const [notifSupported, setNotifSupported] = useState(false);
+  const [notifEnabled, setNotifEnabled] = useState(false);
 
   useEffect(() => {
     if (user?.email) {
       fetch(`/api/comments?email=${encodeURIComponent(user.email)}&taskId=${task.id}`)
         .then(res => res.json())
-        .then(data => {
-          if (data.comments) setComments(data.comments);
-        })
+        .then(data => { if (data.comments) setComments(data.comments); })
         .finally(() => setLoadingComments(false));
     }
   }, [task.id, user?.email]);
 
+  // Check push notification support and current permission
+  useEffect(() => {
+    if ("Notification" in window) {
+      setNotifSupported(true);
+      setNotifEnabled(Notification.permission === "granted");
+    }
+  }, []);
+
+  const handleEnableNotifications = async () => {
+    if (!("Notification" in window)) return;
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      setNotifEnabled(true);
+      // Store subscription in localStorage keyed by taskId + email
+      const key = `notif_${task.id}_${user?.email}`;
+      localStorage.setItem(key, "true");
+      new Notification("Notifications enabled", {
+        body: `You'll be notified when "${task.name}" is updated.`,
+        icon: "/favicon.ico",
+      });
+    }
+  };
+
   const handleSave = async () => {
     if (!user?.email) return;
     setIsEditing(true);
-
     try {
       const res = await fetch(`/api/tasks/${task.id}`, {
         method: "PATCH",
@@ -54,6 +85,18 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
       });
 
       if (res.ok) {
+        // Trigger push notification to requester if enabled
+        const notifKey = `notif_${task.id}_${task.requestedBy?.[0]}`;
+        // Server-side notification handled via /api/notify (if implemented)
+        // Client-side: show notification if this user is the watcher
+        const selfKey = `notif_${task.id}_${user.email}`;
+        if (Notification.permission === "granted" && localStorage.getItem(selfKey)) {
+          new Notification(`Task updated: ${task.name}`, {
+            body: `Status changed to "${status}"`,
+            icon: "/favicon.ico",
+          });
+        }
+
         onUpdate({
           ...task,
           status,
@@ -72,11 +115,45 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
     }
   };
 
+  const handleCommentFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFileError("");
+    const incoming = Array.from(e.target.files || []);
+    const combined = [...commentFiles, ...incoming];
+    if (combined.length > MAX_COMMENT_FILES) {
+      setFileError(`Max ${MAX_COMMENT_FILES} files.`);
+      return;
+    }
+    if (combined.reduce((s, f) => s + f.size, 0) > MAX_COMMENT_BYTES) {
+      setFileError("Total size exceeds 100MB.");
+      return;
+    }
+    setCommentFiles(combined);
+    e.target.value = "";
+  };
+
+  const removeCommentFile = (i: number) => {
+    setCommentFiles(prev => prev.filter((_, idx) => idx !== i));
+    setFileError("");
+  };
+
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newComment.trim() || !user?.email) return;
+    if ((!newComment.trim() && commentFiles.length === 0) || !user?.email) return;
+    setIsPosting(true);
 
     try {
+      // Upload files first
+      const uploadedUrls: string[] = [];
+      for (const file of commentFiles) {
+        const uploadRes = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
+          method: "POST",
+          body: file,
+        });
+        if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
+        const blob = await uploadRes.json();
+        uploadedUrls.push(blob.url);
+      }
+
       const res = await fetch(`/api/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -84,23 +161,51 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
           email: user.email,
           taskId: task.id,
           text: newComment,
+          fileUrls: uploadedUrls,
         }),
       });
 
       if (res.ok) {
+        const optimistic = {
+          id: Date.now().toString(),
+          text: newComment,
+          fileUrls: uploadedUrls,
+          createdTime: new Date().toISOString(),
+          createdBy: user.email,
+        };
+        setComments(prev => [optimistic, ...prev]);
         setNewComment("");
-        // Optimistically add
-        setComments([{ id: Date.now().toString(), text: `[${user.email}] ${newComment}`, createdTime: new Date().toISOString() }, ...comments]);
+        setCommentFiles([]);
+
+        // Notify the requester if they subscribed
+        const requesterEmail = task.requestedBy?.[0];
+        if (
+          requesterEmail &&
+          requesterEmail !== user.email &&
+          Notification.permission === "granted" &&
+          localStorage.getItem(`notif_${task.id}_${user.email}`)
+        ) {
+          new Notification(`New comment on: ${task.name}`, {
+            body: newComment || `${uploadedUrls.length} file(s) attached`,
+            icon: "/favicon.ico",
+          });
+        }
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to post comment.");
+    } finally {
+      setIsPosting(false);
     }
   };
+
+  const formatBytes = (b: number) =>
+    b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      
+
       <div className="bg-brand-bg border border-brand-border rounded-lg shadow-2xl z-10 w-full max-w-5xl max-h-full flex flex-col md:flex-row overflow-hidden relative">
         <button onClick={onClose} className="absolute top-4 right-4 text-brand-text/50 hover:text-brand-text z-20">
           <X size={24} />
@@ -110,14 +215,24 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
         <div className="flex-1 p-8 overflow-y-auto border-r border-brand-border custom-scrollbar">
           <div className="mb-6">
             <h2 className="text-4xl text-brand-accent mb-2 pr-8">{task.name}</h2>
-            <div className="flex items-center gap-2 text-brand-text/60">
-              <span className="uppercase tracking-wide text-xs border border-brand-border px-2 py-0.5 bg-brand-card">{task.status}</span>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="uppercase tracking-wide text-xs border border-brand-border px-2 py-0.5 bg-brand-card text-brand-text/60">{task.status}</span>
+              {notifSupported && (
+                <button
+                  onClick={handleEnableNotifications}
+                  className={`text-xs px-2 py-0.5 border rounded-sm transition-colors ${
+                    notifEnabled
+                      ? "border-brand-accent text-brand-accent bg-brand-accent/10"
+                      : "border-brand-border text-brand-text/40 hover:border-brand-text/30"
+                  }`}
+                >
+                  {notifEnabled ? "🔔 Notifications On" : "🔕 Enable Notifications"}
+                </button>
+              )}
             </div>
           </div>
 
           <div className="space-y-6">
-            {/* Deliverable button removed to prevent duplication, moved to Properties list below */}
-
             <div>
               <h3 className="font-bebas text-xl text-brand-text/50 border-b border-brand-border pb-1 mb-3">Brief</h3>
               <p className="whitespace-pre-wrap text-brand-text/80 leading-relaxed text-sm">{task.brief || "No brief provided."}</p>
@@ -138,10 +253,6 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
                   <div>
                     <span className="text-brand-text/40 block text-xs uppercase tracking-wider">Requested By</span>
                     <span className="text-brand-text/90">{task.requestedBy?.join(", ") || "Unknown"}</span>
-                  </div>
-                  <div>
-                    <span className="text-brand-text/40 block text-xs uppercase tracking-wider">Effort</span>
-                    <span className="text-brand-text/90">{task.effort || "None"}</span>
                   </div>
                   <div>
                     <span className="text-brand-text/40 block text-xs uppercase tracking-wider">Deliverable URL</span>
@@ -179,7 +290,6 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
                       {isEditing ? "Saving..." : "Save Changes"}
                     </button>
                   </h3>
-                  
                   <div className="space-y-4">
                     <div>
                       <label className="text-brand-text/40 block text-xs uppercase tracking-wider mb-1">Status</label>
@@ -190,12 +300,10 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
                         <option value="Done">Done</option>
                       </select>
                     </div>
-
                     <div>
                       <label className="text-brand-text/40 block text-xs uppercase tracking-wider mb-1">Due Date</label>
                       <input type="date" className="input-field py-1 text-sm bg-brand-bg" value={dueDate} onChange={e => setDueDate(e.target.value)} />
                     </div>
-
                     <div>
                       <label className="text-brand-text/40 block text-xs uppercase tracking-wider mb-1">Assigned Email</label>
                       <input type="email" placeholder="user@ghostbond.com" className="input-field py-1 text-sm bg-brand-bg" value={assignedEmail} onChange={e => setAssignedEmail(e.target.value)} />
@@ -212,7 +320,7 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
           <div className="p-4 border-b border-brand-border">
             <h3 className="font-bebas text-xl text-brand-text/80">Activity & Comments</h3>
           </div>
-          
+
           <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-brand-bg/20">
             {loadingComments ? (
               <p className="text-brand-text/40 text-sm italic">Loading comments...</p>
@@ -220,7 +328,26 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
               comments.map(c => (
                 <div key={c.id} className="bg-brand-bg border border-brand-border/50 p-3 rounded-sm">
                   <p className="text-xs text-brand-text/40 mb-1">{format(new Date(c.createdTime), "MMM d • h:mm a")}</p>
-                  <p className="text-sm text-brand-text/90 leading-snug break-words">{c.text}</p>
+                  {c.text && <p className="text-sm text-brand-text/90 leading-snug break-words mb-2">{c.text}</p>}
+                  {c.fileUrls && c.fileUrls.length > 0 && (
+                    <div className="space-y-1 mt-1">
+                      {c.fileUrls.map((url: string, i: number) => {
+                        const filename = decodeURIComponent(url.split("/").pop() || `File ${i + 1}`);
+                        return (
+                          <a
+                            key={i}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 text-xs text-brand-accent hover:underline"
+                          >
+                            <FileIcon size={12} />
+                            {filename}
+                          </a>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               ))
             ) : (
@@ -228,17 +355,63 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
             )}
           </div>
 
-          <form onSubmit={handlePostComment} className="p-4 bg-brand-card border-t border-brand-border flex gap-2">
-            <input 
-              type="text" 
-              placeholder="Add a comment..."
-              className="input-field py-2 flex-1 bg-brand-bg text-sm placeholder:text-brand-text/30"
-              value={newComment}
-              onChange={e => setNewComment(e.target.value)}
-            />
-            <button type="submit" className="bg-brand-accent text-brand-bg p-2 rounded-sm hover:brightness-110" disabled={!newComment.trim()}>
-              <Send size={18} />
-            </button>
+          {/* Comment input */}
+          <form onSubmit={handlePostComment} className="p-4 bg-brand-card border-t border-brand-border space-y-2">
+            {/* File previews */}
+            {commentFiles.length > 0 && (
+              <div className="space-y-1">
+                {commentFiles.map((f, i) => (
+                  <div key={i} className="flex items-center justify-between bg-brand-bg border border-brand-border/50 rounded-sm px-2 py-1">
+                    <span className="text-xs text-brand-text/60 truncate max-w-[75%]">{f.name}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-brand-text/30">{formatBytes(f.size)}</span>
+                      <button type="button" onClick={() => removeCommentFile(i)} className="text-brand-text/30 hover:text-brand-danger">
+                        <X size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {fileError && <p className="text-xs text-brand-danger">{fileError}</p>}
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Add a comment..."
+                className="input-field py-2 flex-1 bg-brand-bg text-sm placeholder:text-brand-text/30"
+                value={newComment}
+                onChange={e => setNewComment(e.target.value)}
+              />
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleCommentFileChange}
+                disabled={commentFiles.length >= MAX_COMMENT_FILES}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-brand-card border border-brand-border text-brand-text/50 hover:text-brand-accent p-2 rounded-sm transition-colors"
+                title="Attach files"
+              >
+                <Paperclip size={18} />
+              </button>
+              <button
+                type="submit"
+                className="bg-brand-accent text-brand-bg p-2 rounded-sm hover:brightness-110 disabled:opacity-40"
+                disabled={isPosting || (!newComment.trim() && commentFiles.length === 0)}
+              >
+                {isPosting ? (
+                  <div className="h-[18px] w-[18px] border-2 border-brand-bg border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Send size={18} />
+                )}
+              </button>
+            </div>
           </form>
         </div>
       </div>
