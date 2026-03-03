@@ -100,7 +100,7 @@ export default function NewRequestPage() {
           brief: formData.brief,
           channel: formData.channel,
           dueDate: formData.dueDate,
-          fileLink: fileLinks.length === 1 ? fileLinks[0] : fileLinks.length > 1 ? fileLinks.join(", ") : undefined,
+          fileLinks: fileLinks.length > 0 ? fileLinks : undefined,
         }),
       });
 
