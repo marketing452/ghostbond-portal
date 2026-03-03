@@ -1,14 +1,6 @@
 "use client";
 
-for (const file of selectedFiles) {
-  const uploadRes = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
-    method: "POST",
-    body: file,
-  });
-  if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
-  const blobData = await uploadRes.json();
-  fileLinks.push(blobData.url);
-}
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Save, X } from "lucide-react";
@@ -64,13 +56,14 @@ export default function NewRequestPage() {
     try {
       const fileLinks: string[] = [];
       for (const file of selectedFiles) {
-        const blob = await upload(file.name, file, {
-          access: 'public',
-          handleUploadUrl: '/api/upload',
-          clientPayload: user.email,
-        });
-        fileLinks.push(blob.url);
-      }
+  const uploadRes = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    body: file,
+  });
+  if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
+  const blobData = await uploadRes.json();
+  fileLinks.push(blobData.url);
+}
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
