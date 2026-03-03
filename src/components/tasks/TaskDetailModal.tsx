@@ -1,3 +1,5 @@
+"use client";
+
 // Add this import at the top of both files
 import { upload } from '@vercel/blob/client';
 
@@ -11,8 +13,6 @@ for (const file of selectedFiles) {
   });
   fileLinks.push(blob.url);
 }
-
-"use client";
 
 import { useState, useEffect, useRef } from "react";
 import type { Task } from "@/types/task";
