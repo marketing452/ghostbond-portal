@@ -10,7 +10,6 @@ export async function GET(request: Request) {
   if (!email || !isAuthorizedDomain(email)) {
     return NextResponse.json({ error: 'Unauthorized domain' }, { status: 403 });
   }
-
   if (!taskId) {
     return NextResponse.json({ error: 'Missing taskId' }, { status: 400 });
   }
@@ -20,37 +19,33 @@ export async function GET(request: Request) {
     const response = await notion.comments.list({ block_id: taskId });
 
     const comments = response.results.map((c: any) => {
-      const fullText = c.rich_text?.map((rt: any) => rt.plain_text).join('') || '';
+      const richText: any[] = c.rich_text || [];
 
-      // Extract email from [email] prefix added during POST
-      let rawText = fullText;
+      // First block contains "[email] comment text"
+      const firstBlock = richText[0]?.plain_text || '';
+      let text = firstBlock;
       let createdBy = 'Unknown';
-      const emailMatch = fullText.match(/^\[([^\]]+)\]\s*/);
+
+      const emailMatch = firstBlock.match(/^\[([^\]]+)\]\s*/);
       if (emailMatch) {
         createdBy = emailMatch[1];
-        rawText = fullText.slice(emailMatch[0].length);
+        text = firstBlock.slice(emailMatch[0].length);
       }
 
-      // Convert email to display name e.g. "madan.haribhat@prohairlabs.com" → "Madan Haribhat"
+      // Convert email to display name
       const displayName = createdBy.includes('@')
         ? createdBy.split('@')[0].split('.').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
         : createdBy;
 
-      // Parse file URLs appended as JSON
-      let text = rawText;
-      let fileUrls: string[] = [];
-      const fileMarker = '\n__files__:';
-      const markerIdx = rawText.lastIndexOf(fileMarker);
-      if (markerIdx !== -1) {
-        text = rawText.slice(0, markerIdx);
-        try {
-          fileUrls = JSON.parse(rawText.slice(markerIdx + fileMarker.length));
-        } catch {}
-      }
+      // Remaining blocks with links are file attachments
+      const fileUrls: string[] = richText
+        .slice(1)
+        .filter((rt: any) => rt.href || rt.text?.link?.url)
+        .map((rt: any) => rt.href || rt.text?.link?.url);
 
       return {
         id: c.id,
-        text,
+        text: text.trim(),
         fileUrls,
         createdTime: c.created_time,
         createdBy: displayName,
@@ -71,21 +66,38 @@ export async function POST(request: Request) {
   if (!email || !isAuthorizedDomain(email)) {
     return NextResponse.json({ error: 'Unauthorized domain' }, { status: 403 });
   }
-
   if (!taskId || (!text && (!fileUrls || fileUrls.length === 0))) {
     return NextResponse.json({ error: 'Missing taskId or content' }, { status: 400 });
   }
 
   try {
-    let commentContent = `[${email}] ${text || ''}`.trim();
+    const notion = getNotionClient();
+
+    // Build rich_text: first block is "[email] comment", then one block per file as a named link
+    const richText: any[] = [
+      {
+        type: 'text',
+        text: { content: `[${email}] ${text || ''}`.trim() },
+      },
+    ];
+
     if (fileUrls && fileUrls.length > 0) {
-      commentContent += `\n__files__:${JSON.stringify(fileUrls)}`;
+      for (const url of fileUrls) {
+        // Extract a clean filename from the URL
+        const filename = decodeURIComponent(url.split('/').pop() || 'File').split('?')[0];
+        richText.push({
+          type: 'text',
+          text: {
+            content: `\n📎 ${filename}`,
+            link: { url },
+          },
+        });
+      }
     }
 
-    const notion = getNotionClient();
     const newComment = await notion.comments.create({
       parent: { page_id: taskId },
-      rich_text: [{ text: { content: commentContent } }],
+      rich_text: richText,
     });
 
     return NextResponse.json({ success: true, comment: newComment });
@@ -94,3 +106,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
+```
+
+In Notion it will now look like:
+```
+[madan.haribhat@prohairlabs.com] Hi check this out
+📎 video.mp4          ← clickable link
+📎 brief.pdf          ← clickable link
