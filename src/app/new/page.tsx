@@ -1,3 +1,17 @@
+// Add this import at the top of both files
+import { upload } from '@vercel/blob/client';
+
+// Replace the upload loop with this in handleSubmit (page.tsx) 
+// and handlePostComment (TaskDetailModal.tsx):
+for (const file of selectedFiles) {
+  const blob = await upload(file.name, file, {
+    access: 'public',
+    handleUploadUrl: '/api/upload',
+    clientPayload: user.email, // passed to onBeforeGenerateToken
+  });
+  fileLinks.push(blob.url);
+}
+
 "use client";
 
 import { useState } from "react";
