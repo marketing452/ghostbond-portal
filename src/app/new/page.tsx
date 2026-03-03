@@ -2,11 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Save } from "lucide-react";
+import { ArrowLeft, Save, X } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthContext";
 
 const CHANNELS = ["Amazon", "Email", "Marketing", "Social Media", "Website", "Blog", "Amazon Video", "Other", "AI", "Event", "test", "Bing"];
+
+const MAX_FILES = 10;
+const MAX_TOTAL_MB = 100;
+const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
 
 export default function NewRequestPage() {
   const router = useRouter();
@@ -20,7 +24,8 @@ export default function NewRequestPage() {
     dueDate: "",
   });
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState<string>("");
 
   const toggleArrayItem = (field: "channel", item: string) => {
     setFormData((prev) => {
@@ -33,27 +38,59 @@ export default function NewRequestPage() {
     });
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFileError("");
+    const newFiles = Array.from(e.target.files || []);
+    const combined = [...selectedFiles, ...newFiles];
+
+    if (combined.length > MAX_FILES) {
+      setFileError(`Maximum ${MAX_FILES} files allowed.`);
+      return;
+    }
+
+    const totalBytes = combined.reduce((sum, f) => sum + f.size, 0);
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      setFileError(`Total file size cannot exceed ${MAX_TOTAL_MB}MB.`);
+      return;
+    }
+
+    setSelectedFiles(combined);
+    // Reset input so same file can be re-added after removal
+    e.target.value = "";
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+    setFileError("");
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.email) return;
 
     setIsSubmitting(true);
     try {
-      let finalFileLink = "";
+      const fileLinks: string[] = [];
 
-      // Handle file upload sequence natively using Vercel Blob
-      if (selectedFile) {
-        const uploadRes = await fetch(`/api/upload?filename=${encodeURIComponent(selectedFile.name)}`, {
-          method: 'POST',
-          body: selectedFile,
+      // Upload each file sequentially
+      for (const file of selectedFiles) {
+        const uploadRes = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
+          method: "POST",
+          body: file,
         });
 
-        if (!uploadRes.ok) throw new Error("Failed to upload file to Blob storage.");
+        if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
         const blobData = await uploadRes.json();
-        finalFileLink = blobData.url;
+        fileLinks.push(blobData.url);
       }
 
-      // Automatically binds session user.email inside route
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -63,7 +100,7 @@ export default function NewRequestPage() {
           brief: formData.brief,
           channel: formData.channel,
           dueDate: formData.dueDate,
-          fileLink: finalFileLink || undefined,
+          fileLink: fileLinks.length === 1 ? fileLinks[0] : fileLinks.length > 1 ? fileLinks.join(", ") : undefined,
         }),
       });
 
@@ -93,27 +130,25 @@ export default function NewRequestPage() {
         <p className="text-brand-text/50 font-bebas text-xl mb-8">Fill out the details below to submit a new marketing request to the pipeline.</p>
 
         <form onSubmit={handleSubmit} className="space-y-8">
-          {/* Requested By is omitted, implicitly tied to logged in User */}
-
           <div>
             <label className="block font-bebas text-xl text-brand-text/80 mb-2">Task Name <span className="text-brand-danger">*</span></label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               required
-              className="input-field" 
+              className="input-field"
               placeholder="e.g., Summer Social Media Campaign"
               value={formData.taskName}
-              onChange={(e) => setFormData({...formData, taskName: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, taskName: e.target.value })}
             />
           </div>
 
           <div>
             <label className="block font-bebas text-xl text-brand-text/80 mb-2">Brief</label>
-            <textarea 
-              className="input-field min-h-[120px]" 
+            <textarea
+              className="input-field min-h-[120px]"
               placeholder="Describe the requirements..."
               value={formData.brief}
-              onChange={(e) => setFormData({...formData, brief: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, brief: e.target.value })}
             />
           </div>
 
@@ -121,15 +156,15 @@ export default function NewRequestPage() {
             <div>
               <label className="block font-bebas text-xl text-brand-text/80 mb-2">Channel</label>
               <div className="flex flex-wrap gap-2">
-                {CHANNELS.map(c => (
+                {CHANNELS.map((c) => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => toggleArrayItem("channel", c)}
                     className={`px-3 py-1 text-sm border rounded-sm transition-colors ${
-                      formData.channel.includes(c) 
-                        ? 'bg-brand-accent border-brand-accent text-brand-bg font-bold' 
-                        : 'border-brand-border text-brand-text/70 hover:border-brand-text/30'
+                      formData.channel.includes(c)
+                        ? "bg-brand-accent border-brand-accent text-brand-bg font-bold"
+                        : "border-brand-border text-brand-text/70 hover:border-brand-text/30"
                     }`}
                   >
                     {c}
@@ -140,29 +175,64 @@ export default function NewRequestPage() {
 
             <div>
               <label className="block font-bebas text-xl text-brand-text/80 mb-2">Due Date</label>
-              <input 
-                type="date" 
-                className="input-field cursor-pointer" 
+              <input
+                type="date"
+                className="input-field cursor-pointer"
                 value={formData.dueDate}
-                onChange={(e) => setFormData({...formData, dueDate: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
               />
             </div>
           </div>
 
           <div>
-            <label className="block font-bebas text-xl text-brand-text/80 mb-2">File / Media Upload</label>
-            <input 
+            <label className="block font-bebas text-xl text-brand-text/80 mb-2">
+              File / Media Upload
+              <span className="ml-2 text-sm font-sans text-brand-text/40 normal-case">
+                (max {MAX_FILES} files, {MAX_TOTAL_MB}MB total)
+              </span>
+            </label>
+
+            <input
               type="file"
+              multiple
               className="input-field file:mr-4 file:py-2 file:px-4 file:rounded-sm file:border-0 file:text-sm file:font-bold file:bg-brand-accent file:text-brand-bg hover:file:brightness-110 cursor-pointer text-brand-text/70"
-              onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
+              onChange={handleFileChange}
+              disabled={selectedFiles.length >= MAX_FILES}
             />
+
+            {fileError && (
+              <p className="mt-2 text-sm text-brand-danger">{fileError}</p>
+            )}
+
+            {selectedFiles.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {selectedFiles.map((file, i) => (
+                  <div key={i} className="flex items-center justify-between bg-brand-bg border border-brand-border rounded-sm px-3 py-2">
+                    <span className="text-sm text-brand-text/70 truncate max-w-[80%]">{file.name}</span>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-xs text-brand-text/40">{formatBytes(file.size)}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeFile(i)}
+                        className="text-brand-text/40 hover:text-brand-danger transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <p className="text-xs text-brand-text/40 text-right">
+                  {selectedFiles.length}/{MAX_FILES} files · {formatBytes(totalSize)} / {MAX_TOTAL_MB}MB
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="pt-4 flex justify-end">
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={isSubmitting}
-              className={`btn-primary flex items-center ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`btn-primary flex items-center ${isSubmitting ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               {isSubmitting ? (
                 <div className="h-5 w-5 mr-3 border-2 border-brand-bg border-t-transparent rounded-full animate-spin"></div>
