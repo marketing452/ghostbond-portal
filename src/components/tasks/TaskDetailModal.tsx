@@ -105,7 +105,11 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
     e.target.value = "";
   };
 
-  const removeCommentFile = (i: number) => { setCommentFiles(prev => prev.filter((_, idx) => idx !== i)); setFileError(""); };
+  const removeCommentFile = (i: number) => {
+    setCommentFiles(prev => prev.filter((_, idx) => idx !== i));
+    setFileError("");
+  };
+
   const formatBytes = (b: number) => b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`;
 
   const handlePostComment = async (e: React.FormEvent) => {
@@ -114,26 +118,30 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
     setIsPosting(true);
     try {
       const uploadedUrls: string[] = [];
-     for (const file of commentFiles) {
-  const blob = await upload(file.name, file, {
-    access: 'public',
-    handleUploadUrl: '/api/upload',
-    clientPayload: user.email,
-  });
-  uploadedUrls.push(blob.url);
-}
+      for (const file of commentFiles) {
+        const blob = await upload(file.name, file, {
+          access: 'public',
+          handleUploadUrl: '/api/upload',
+          clientPayload: user.email,
+        });
+        uploadedUrls.push(blob.url);
+      }
+
       const res = await fetch(`/api/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: user.email, taskId: task.id, text: newComment, fileUrls: uploadedUrls }),
       });
+
       if (res.ok) {
+        // Derive display name from email for immediate UI update
+        const displayName = user.email.split('@')[0].split('.').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         setComments(prev => [{
           id: Date.now().toString(),
           text: newComment,
           fileUrls: uploadedUrls,
           createdTime: new Date().toISOString(),
-          createdBy: user.email,
+          createdBy: displayName,
         }, ...prev]);
         setNewComment("");
         setCommentFiles([]);
@@ -254,24 +262,37 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
           <div className="p-4 border-b border-brand-border">
             <h3 className="font-bebas text-xl text-brand-text/80">Activity & Comments</h3>
           </div>
+
           <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-brand-bg/20">
             {loadingComments ? (
               <p className="text-brand-text/40 text-sm italic">Loading comments...</p>
             ) : comments.length > 0 ? (
               comments.map(c => (
-                <div key={c.id} className="bg-brand-bg border border-brand-border/50 p-3 rounded-sm">
-                  <p className="text-xs text-brand-text/40 mb-1">{format(new Date(c.createdTime), "MMM d • h:mm a")}</p>
-                  {c.text && <p className="text-sm text-brand-text/90 leading-snug break-words mb-2">{c.text}</p>}
-                  {c.fileUrls && c.fileUrls.length > 0 && (
-                    <div className="space-y-1">
-                      {c.fileUrls.map((url: string, i: number) => (
-                        <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-xs text-brand-accent hover:underline">
-                          <FileIcon size={12} />
-                          {decodeURIComponent(url.split("/").pop() || `File ${i + 1}`)}
-                        </a>
-                      ))}
+                <div key={c.id} className="flex gap-2.5">
+                  {/* Avatar */}
+                  <div className="shrink-0 w-7 h-7 rounded-full bg-brand-accent/20 border border-brand-accent/40 flex items-center justify-center text-xs font-bold text-brand-accent uppercase">
+                    {c.createdBy?.[0] || '?'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2 mb-1">
+                      <span className="text-xs font-semibold text-brand-text/80">{c.createdBy}</span>
+                      <span className="text-xs text-brand-text/30">{format(new Date(c.createdTime), "MMM d • h:mm a")}</span>
                     </div>
-                  )}
+                    <div className="bg-brand-bg border border-brand-border/50 rounded-sm px-3 py-2">
+                      {c.text && <p className="text-sm text-brand-text/90 leading-snug break-words">{c.text}</p>}
+                      {c.fileUrls && c.fileUrls.length > 0 && (
+                        <div className={`space-y-1 ${c.text ? 'mt-2 pt-2 border-t border-brand-border/30' : ''}`}>
+                          {c.fileUrls.map((url: string, i: number) => (
+                            <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 text-xs text-brand-accent hover:underline">
+                              <FileIcon size={12} />
+                              {decodeURIComponent(url.split('/').pop() || `File ${i + 1}`)}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))
             ) : (
@@ -279,6 +300,7 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
             )}
           </div>
 
+          {/* Comment Input */}
           <form onSubmit={handlePostComment} className="p-4 bg-brand-card border-t border-brand-border space-y-2">
             {commentFiles.length > 0 && (
               <div className="space-y-1">
@@ -295,14 +317,20 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
             )}
             {fileError && <p className="text-xs text-brand-danger">{fileError}</p>}
             <div className="flex gap-2">
-              <input type="text" placeholder="Add a comment..." className="input-field py-2 flex-1 bg-brand-bg text-sm placeholder:text-brand-text/30"
-                value={newComment} onChange={e => setNewComment(e.target.value)} />
+              <input
+                type="text"
+                placeholder="Add a comment..."
+                className="input-field py-2 flex-1 bg-brand-bg text-sm placeholder:text-brand-text/30"
+                value={newComment}
+                onChange={e => setNewComment(e.target.value)}
+              />
               <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleCommentFileChange} disabled={commentFiles.length >= MAX_COMMENT_FILES} />
               <button type="button" onClick={() => fileInputRef.current?.click()}
                 className="bg-brand-card border border-brand-border text-brand-text/50 hover:text-brand-accent p-2 rounded-sm transition-colors" title="Attach files">
                 <Paperclip size={18} />
               </button>
-              <button type="submit" className="bg-brand-accent text-brand-bg p-2 rounded-sm hover:brightness-110 disabled:opacity-40"
+              <button type="submit"
+                className="bg-brand-accent text-brand-bg p-2 rounded-sm hover:brightness-110 disabled:opacity-40"
                 disabled={isPosting || (!newComment.trim() && commentFiles.length === 0)}>
                 {isPosting
                   ? <div className="h-[18px] w-[18px] border-2 border-brand-bg border-t-transparent rounded-full animate-spin" />
