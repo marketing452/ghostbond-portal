@@ -1,6 +1,10 @@
 import { put } from '@vercel/blob';
 import { NextResponse } from 'next/server';
 
+// Edge runtime streams the request body directly to Vercel Blob
+// bypassing the 4.5MB serverless function body size limit entirely
+export const runtime = 'edge';
+
 export async function POST(request: Request): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const filename = searchParams.get('filename');
@@ -14,10 +18,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Missing blob token' }, { status: 500 });
   }
 
+  if (!request.body) {
+    return NextResponse.json({ error: 'No file body received' }, { status: 400 });
+  }
+
   try {
-    // Buffer the body instead of streaming — fixes Hobby plan compatibility
-    const buffer = await request.arrayBuffer();
-    const blob = await put(filename, buffer, {
+    // Stream directly to Vercel Blob — never buffers into memory
+    const blob = await put(filename, request.body, {
       access: 'public',
       token,
     });
