@@ -1,6 +1,6 @@
 "use client";
 
-import { upload } from '@vercel/blob/client';
+
 import { useState, useEffect, useRef } from "react";
 import type { Task } from "@/types/task";
 import { X, Send, Paperclip, FileIcon } from "lucide-react";
@@ -114,14 +114,15 @@ export default function TaskDetailModal({ task, onClose, onUpdate }: TaskDetailM
     setIsPosting(true);
     try {
       const uploadedUrls: string[] = [];
-      for (const file of commentFiles) {
-        const blob = await upload(file.name, file, {
-          access: 'public',
-          handleUploadUrl: '/api/upload',
-          clientPayload: user.email,
-        });
-        uploadedUrls.push(blob.url);
-      }
+     for (const file of commentFiles) {
+  const uploadRes = await fetch(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    body: file,
+  });
+  if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
+  const blob = await uploadRes.json();
+  uploadedUrls.push(blob.url);
+}
       const res = await fetch(`/api/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
