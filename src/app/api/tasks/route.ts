@@ -10,7 +10,6 @@ function mapNotionPropertiesToTask(pageId: string, properties: any): Task {
     status: properties['Status']?.status?.name || 'Requests',
     channel: properties['Channel']?.multi_select?.map((s: any) => s.name) || [],
     creativeType: properties['Creative Type']?.multi_select?.map((s: any) => s.name) || [],
-    // Assigned to is people, Requested By is an email text property directly
     assignedTo: properties['Assigned To']?.people?.map((p: any) => p.name || p.person?.email) || [],
     requestedBy: properties['Requested By']?.email ? [properties['Requested By'].email] : [],
     dueDate: properties['Due Date']?.date?.start || null,
@@ -35,7 +34,6 @@ export async function GET(request: Request) {
     let filter: any = undefined;
 
     if (!isMgr) {
-      // Filter strictly by the Requested By Email property natively in Notion querying
       filter = {
         property: 'Requested By',
         email: {
@@ -49,7 +47,7 @@ export async function GET(request: Request) {
     const DATABASE_ID = getDatabaseId();
     const queryPayload: any = {
       database_id: DATABASE_ID,
-      data_source_id: DATABASE_ID, // added for v5 compat if necessary
+      data_source_id: DATABASE_ID,
       sorts: [
         {
           timestamp: 'created_time',
@@ -66,10 +64,7 @@ export async function GET(request: Request) {
     console.log('[DEBUG] Querying Notion with email:', email);
     console.log('[DEBUG] Payload:', JSON.stringify(queryPayload));
 
-    // Fetch from Notion
-    // Format UUID with hyphens
     const formattedId = DATABASE_ID.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
-    // Using native fetch because v5.11.0 SDK removed databases.query and notion.request URL validation fails
     const notionRes = await fetch(`https://api.notion.com/v1/databases/${formattedId}/query`, {
       method: 'POST',
       headers: {
@@ -105,14 +100,14 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { email, taskName, brief, channel, dueDate, requestedById, fileLink } = body;
+  // Accept either fileLinks (array) or fileLink (legacy single string)
+  const { email, taskName, brief, channel, dueDate, requestedById, fileLinks, fileLink } = body;
 
   if (!email || !isAuthorizedDomain(email)) {
     return NextResponse.json({ error: 'Unauthorized domain or missing email' }, { status: 403 });
   }
 
   try {
-
     const properties: any = {
       'Task Name': { title: [{ text: { content: taskName || 'New Request' } }] },
       'Status': { status: { name: 'Requests' } },
@@ -128,12 +123,23 @@ export async function POST(request: Request) {
       properties['Due Date'] = { date: { start: dueDate } };
     }
     
-    // Natively bind the user's session email to the Notion Email property
     properties['Requested By'] = { email: email.toLowerCase() };
     
-    // In next phase we will replace this fileLink setup with Vercel Blob parsing (handled by FormData)
-    if (fileLink) {
-      properties['Files & media'] = { files: [{ type: "external", name: "Link", external: { url: fileLink } }] };
+    // Build files array — support multiple URLs (fileLinks) or single legacy fileLink
+    const urls: string[] = fileLinks && fileLinks.length > 0
+      ? fileLinks
+      : fileLink
+        ? [fileLink]
+        : [];
+
+    if (urls.length > 0) {
+      properties['Files & media'] = {
+        files: urls.map((url: string, i: number) => ({
+          type: "external",
+          name: `File ${i + 1}`,
+          external: { url },
+        })),
+      };
     }
 
     const notion = getNotionClient();
